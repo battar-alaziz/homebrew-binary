@@ -11,6 +11,8 @@ on:
         description: "Branch or tag from deployaja-cli (e.g. main)"
         required: true
         default: "main"
+permissions:
+  contents: write
 
 jobs:
   build-release:
