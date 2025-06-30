@@ -1,0 +1,94 @@
+name: Build DeployAja & Release Binary
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Version tag to release (e.g. v1.0.3)"
+        required: true
+        type: string
+      source_ref:
+        description: "Branch or tag from deployaja-cli (e.g. main)"
+        required: true
+        default: "main"
+
+jobs:
+  build-release:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Clone deployaja-cli source
+        run: |
+          git clone https://github.com/battar-alaziz/deployaja-cli.git
+          cd deployaja-cli
+          git checkout ${{ inputs.source_ref }}
+          cd ..
+
+      - name: Set up Go
+        uses: actions/setup-go@v4
+        with:
+          go-version: 1.21
+
+      - name: Build Linux binary
+        run: |
+          cd deployaja-cli
+          GOOS=linux GOARCH=amd64 go build -o ../aja-linux main.go
+
+      - name: Build macOS binary
+        run: |
+          cd deployaja-cli
+          GOOS=darwin GOARCH=amd64 go build -o ../aja-macos main.go
+
+      - name: Generate SHA256
+        run: |
+          echo "sha_linux=$(shasum -a 256 aja-linux | cut -d ' ' -f1)" >> $GITHUB_ENV
+          echo "sha_macos=$(shasum -a 256 aja-macos | cut -d ' ' -f1)" >> $GITHUB_ENV
+
+      - name: Create GitHub Release and Upload Assets
+        uses: softprops/action-gh-release@v1
+        with:
+          tag_name: ${{ inputs.version }}
+          name: ${{ inputs.version }}
+          files: |
+            aja-linux
+            aja-macos
+
+      - name: Checkout this repo
+        uses: actions/checkout@v3
+
+      - name: Update Formula
+        run: |
+          echo "class Aja < Formula" > Formula/aja.rb
+          echo "  desc \"DeployAja CLI tool\"" >> Formula/aja.rb
+          echo "  homepage \"https://github.com/battar-alaziz/deployaja-cli\"" >> Formula/aja.rb
+          echo "  version \"${{ inputs.version }}\"" >> Formula/aja.rb
+          echo "" >> Formula/aja.rb
+          echo "  if OS.mac?" >> Formula/aja.rb
+          echo "    url \"https://github.com/battar-alaziz/homebrew-binary/releases/download/${{ inputs.version }}/aja-macos\"" >> Formula/aja.rb
+          echo "    sha256 \"${{ env.sha_macos }}\"" >> Formula/aja.rb
+          echo "  elsif OS.linux?" >> Formula/aja.rb
+          echo "    url \"https://github.com/battar-alaziz/homebrew-binary/releases/download/${{ inputs.version }}/aja-linux\"" >> Formula/aja.rb
+          echo "    sha256 \"${{ env.sha_linux }}\"" >> Formula/aja.rb
+          echo "  end" >> Formula/aja.rb
+          echo "" >> Formula/aja.rb
+          echo "  def install" >> Formula/aja.rb
+          echo "    if OS.mac?" >> Formula/aja.rb
+          echo "      bin.install \"aja-macos\" => \"aja\"" >> Formula/aja.rb
+          echo "    elsif OS.linux?" >> Formula/aja.rb
+          echo "      bin.install \"aja-linux\" => \"aja\"" >> Formula/aja.rb
+          echo "    end" >> Formula/aja.rb
+          echo "  end" >> Formula/aja.rb
+          echo "" >> Formula/aja.rb
+          echo "  livecheck do" >> Formula/aja.rb
+          echo "    url :stable" >> Formula/aja.rb
+          echo "    strategy :github_latest" >> Formula/aja.rb
+          echo "  end" >> Formula/aja.rb
+          echo "end" >> Formula/aja.rb
+
+      - name: Commit and Push Formula
+        run: |
+          git config user.name "github-actions"
+          git config user.email "actions@github.com"
+          git add Formula/aja.rb
+          git commit -m "Update formula to ${{ inputs.version }}"
+          git push
